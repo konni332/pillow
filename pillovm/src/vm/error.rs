@@ -12,4 +12,6 @@ pub enum VmError {
     UnknownOpcode(u8),
     /// ip walked past the end of bytecode
     IpOutOfBounds,
+    /// GetLocal or SetLocal used a slot index outside the current frame
+    LocalOutOfRange,
 }

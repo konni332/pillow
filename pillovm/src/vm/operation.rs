@@ -36,6 +36,15 @@ pub enum OpCode {
     Jmp = 0x0F,
     JmpIfFalse = 0x10,
     JmpIfTrue = 0x11,
+
+    // Stack operations
+    Pop = 0x12,
+    Dup = 0x13,
+
+    // Locals
+    MakeFrame = 0x14,
+    GetLocal = 0x15,
+    SetLocal = 0x16,
 }
 
 impl OpCode {
@@ -60,6 +69,11 @@ impl OpCode {
             0x0F => Some(Self::Jmp),
             0x10 => Some(Self::JmpIfFalse),
             0x11 => Some(Self::JmpIfTrue),
+            0x12 => Some(Self::Pop),
+            0x13 => Some(Self::Dup),
+            0x14 => Some(Self::MakeFrame),
+            0x15 => Some(Self::GetLocal),
+            0x16 => Some(Self::SetLocal),
             _ => None,
         }
     }

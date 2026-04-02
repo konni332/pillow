@@ -19,6 +19,8 @@ pub struct Vm<'code> {
     ip_end: *const u8,
     /// Stack pointer: index of next free slot.
     sp: usize,
+    /// Base pointer: index of the first local variable in current frame.
+    bp: usize,
     bytecode: &'code Bytecode<'code>,
     stack: [MaybeUninit<Value>; STACK_MAX],
 }
@@ -38,6 +40,7 @@ impl<'code> Vm<'code> {
             bytecode,
             stack,
             sp: 0,
+            bp: 0,
         }
     }
 
@@ -266,6 +269,55 @@ impl<'code> Vm<'code> {
         Ok((b0 << 24) | (b1 << 16) | (b2 << 8) | b3)
     }
 
+    /// Pop the top of the stack.
+    #[inline(always)]
+    fn op_pop(&mut self) -> Result<(), VmError> {
+        self.pop()?;
+        Ok(())
+    }
+
+    /// Duplicate the top value on the stack, and push it to the stack
+    #[inline(always)]
+    fn op_dup(&mut self) -> Result<(), VmError> {
+        let value = self.peek()?;
+        self.push(value)?;
+        Ok(())
+    }
+
+    /// Reserve `n` local variable slots by pushing `n` nils.
+    /// Must be the first instruction of every function body.
+    /// bp is already set to sp at frame entry (0 for the root frame,
+    /// set by Call for nested frames).
+    #[inline(always)]
+    fn op_make_frame(&mut self) -> Result<(), VmError> {
+        let n = self.read_byte()?;
+        for _ in 0..n {
+            self.push(Value::nil())?;
+        }
+        Ok(())
+    }
+    #[inline(always)]
+    fn op_get_local(&mut self) -> Result<(), VmError> {
+        let slot = self.read_byte()?;
+        let idx = self.bp + slot as usize;
+        if idx >= self.sp {
+            return Err(VmError::LocalOutOfRange);
+        }
+        let val = unsafe { self.stack[idx].as_ptr().read() };
+        self.push(val)
+    }
+    #[inline(always)]
+    fn op_set_local(&mut self) -> Result<(), VmError> {
+        let slot = self.read_byte()?;
+        let idx = self.bp + slot as usize;
+        if idx >= self.sp {
+            return Err(VmError::LocalOutOfRange);
+        }
+        let val = self.pop()?;
+        unsafe { self.stack[idx].as_mut_ptr().write(val) };
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<Value, VmError> {
         loop {
             let byte = self.read_byte()?;
@@ -301,6 +353,13 @@ impl<'code> Vm<'code> {
                 OpCode::Jmp => self.op_jmp()?,
                 OpCode::JmpIfFalse => self.op_jmp_if_false()?,
                 OpCode::JmpIfTrue => self.op_jmp_if_true()?,
+
+                OpCode::Pop => self.op_pop()?,
+                OpCode::Dup => self.op_dup()?,
+
+                OpCode::MakeFrame => self.op_make_frame()?,
+                OpCode::GetLocal => self.op_get_local()?,
+                OpCode::SetLocal => self.op_set_local()?,
 
                 OpCode::Return => {
                     return self.peek();
@@ -374,6 +433,11 @@ mod tests {
     const JMP: u8 = 0x0F;
     const JIF: u8 = 0x10; // JmpIfFalse
     const JIT: u8 = 0x11; // JmpIfTrue
+    const POP: u8 = 0x12;
+    const DUP: u8 = 0x13;
+    const MAKE: u8 = 0x14;
+    const GETL: u8 = 0x15;
+    const SETL: u8 = 0x16;
 
     /// Encode a u32 jump target as 4 big-endian bytes.
     /// Use as: `&[JMP, ...jmp(0x09)]` — spread into the byte slice.
@@ -1341,5 +1405,340 @@ mod tests {
     fn truncated_jmp_operand_errors() {
         // JMP with only 2 of 4 offset bytes
         assert_eq!(run_err(&[JMP, 0x00, 0x00], &[]), VmError::IpOutOfBounds);
+    }
+
+    #[test]
+    fn pop_discards_top() {
+        // 0x00: CONST 0    (2b) → push 1
+        // 0x02: CONST 1    (2b) → push 2
+        // 0x04: POP        (1b) → discard 2
+        // 0x05: RET             → returns 1
+        let code = &[CONST, 0, CONST, 1, POP, RET];
+        assert_val(
+            run_ok(code, &[Value::from_int(1), Value::from_int(2)]),
+            Value::from_int(1),
+        );
+    }
+
+    #[test]
+    fn pop_underflow() {
+        assert_eq!(run_err(&[POP], &[]), VmError::StackUnderflow);
+    }
+
+    #[test]
+    fn dup_copies_top() {
+        // 0x00: CONST 0    (2b) → push 7
+        // 0x02: DUP        (1b) → stack: [7, 7]
+        // 0x03: ADD        (1b) → 14
+        // 0x04: RET
+        let code = &[CONST, 0, DUP, ADD, RET];
+        assert_val(run_ok(code, &[Value::from_int(7)]), Value::from_int(14));
+    }
+
+    #[test]
+    fn dup_leaves_original_intact() {
+        // DUP then POP should leave the original untouched
+        // 0x00: CONST 0    (2b) → push 5
+        // 0x02: DUP        (1b) → stack: [5, 5]
+        // 0x03: POP        (1b) → stack: [5]
+        // 0x04: RET             → returns 5
+        let code = &[CONST, 0, DUP, POP, RET];
+        assert_val(run_ok(code, &[Value::from_int(5)]), Value::from_int(5));
+    }
+
+    #[test]
+    fn dup_underflow() {
+        assert_eq!(run_err(&[DUP], &[]), VmError::StackUnderflow);
+    }
+
+    #[test]
+    fn make_frame_slots_are_nil() {
+        // 0x00: MAKE 3     (2b) → push nil, nil, nil
+        // 0x02: GETL 0     (2b) → push slot 0
+        // 0x04: RET
+        let code = &[MAKE, 3, GETL, 0, RET];
+        assert_val(run_ok(code, &[]), Value::nil());
+    }
+
+    #[test]
+    fn make_frame_all_slots_are_nil() {
+        // Verify slot 2 (last) is also nil, not garbage
+        // 0x00: MAKE 3     (2b)
+        // 0x02: GETL 2     (2b)
+        // 0x04: RET
+        let code = &[MAKE, 3, GETL, 2, RET];
+        assert_val(run_ok(code, &[]), Value::nil());
+    }
+
+    #[test]
+    fn make_frame_zero_is_valid() {
+        // A function with no locals is fine
+        // 0x00: MAKE 0     (2b)
+        // 0x02: CONST 0    (2b) → push 1
+        // 0x04: RET
+        let code = &[MAKE, 0, CONST, 0, RET];
+        assert_val(run_ok(code, &[Value::from_int(1)]), Value::from_int(1));
+    }
+
+    #[test]
+    fn make_frame_overflow() {
+        // Emit enough MAKE instructions to push STACK_MAX + 1 nils total.
+        // Each MAKE can push at most 255 (u8 max).
+        let mut code: Vec<u8> = Vec::new();
+        let mut remaining = STACK_MAX + 1;
+        while remaining > 0 {
+            let n = remaining.min(255) as u8;
+            code.push(MAKE);
+            code.push(n);
+            remaining -= n as usize;
+        }
+        code.push(RET);
+        assert_eq!(run_err(&code, &[]), VmError::StackOverflow);
+    }
+
+    #[test]
+    fn set_then_get_roundtrip() {
+        // 0x00: MAKE 1     (2b) → slot 0 = nil
+        // 0x02: CONST 0    (2b) → push 42
+        // 0x04: SETL 0     (2b) → slot 0 = 42, pop
+        // 0x06: GETL 0     (2b) → push 42
+        // 0x08: RET
+        let code = &[MAKE, 1, CONST, 0, SETL, 0, GETL, 0, RET];
+        assert_val(run_ok(code, &[Value::from_int(42)]), Value::from_int(42));
+    }
+
+    #[test]
+    fn set_overwrites_nil() {
+        // Slot starts as nil, verify it actually changes after SETL
+        // 0x00: MAKE 1     (2b)
+        // 0x02: CONST 0    (2b) → push 99
+        // 0x04: SETL 0     (2b)
+        // 0x06: GETL 0     (2b)
+        // 0x08: NOT        (1b) → nil would give true, 99 gives false
+        // 0x09: RET
+        // If slot were still nil, NOT would return true. 99 is truthy so NOT returns false.
+        let code = &[MAKE, 1, CONST, 0, SETL, 0, GETL, 0, NOT, RET];
+        assert_val(
+            run_ok(code, &[Value::from_int(99)]),
+            Value::from_bool(false),
+        );
+    }
+
+    #[test]
+    fn set_overwrites_previous_value() {
+        // 0x00: MAKE 1     (2b)
+        // 0x02: CONST 0    (2b) → push 1
+        // 0x04: SETL 0     (2b)
+        // 0x06: CONST 1    (2b) → push 2
+        // 0x08: SETL 0     (2b)
+        // 0x0A: GETL 0     (2b)
+        // 0x0C: RET
+        let code = &[MAKE, 1, CONST, 0, SETL, 0, CONST, 1, SETL, 0, GETL, 0, RET];
+        assert_val(
+            run_ok(code, &[Value::from_int(1), Value::from_int(2)]),
+            Value::from_int(2),
+        );
+    }
+
+    #[test]
+    fn multiple_locals_are_independent() {
+        // slot 0 = 10, slot 1 = 32, return slot0 + slot1 = 42
+        //
+        // 0x00: MAKE 2     (2b)
+        // 0x02: CONST 0    (2b) → push 10
+        // 0x04: SETL 0     (2b)
+        // 0x06: CONST 1    (2b) → push 32
+        // 0x08: SETL 1     (2b)
+        // 0x0A: GETL 0     (2b)
+        // 0x0C: GETL 1     (2b)
+        // 0x0E: ADD        (1b)
+        // 0x0F: RET
+        let code = &[
+            MAKE, 2, CONST, 0, SETL, 0, CONST, 1, SETL, 1, GETL, 0, GETL, 1, ADD, RET,
+        ];
+        assert_val(
+            run_ok(code, &[Value::from_int(10), Value::from_int(32)]),
+            Value::from_int(42),
+        );
+    }
+
+    #[test]
+    fn setl_consumes_value_from_stack() {
+        // Stack depth after SETL should be one less than before.
+        // Push sentinel, push value, SETL — RET should return sentinel.
+        //
+        // 0x00: MAKE 1     (2b) → sp = 1
+        // 0x02: CONST 0    (2b) → push sentinel 99,  sp = 2
+        // 0x04: CONST 1    (2b) → push 42,            sp = 3
+        // 0x06: SETL 0     (2b) → slot 0 = 42,       sp = 2
+        // 0x08: RET             → returns 99
+        let code = &[MAKE, 1, CONST, 0, CONST, 1, SETL, 0, RET];
+        assert_val(
+            run_ok(code, &[Value::from_int(99), Value::from_int(42)]),
+            Value::from_int(99),
+        );
+    }
+
+    #[test]
+    fn getl_out_of_range() {
+        // MAKE 1 allocates slot 0 only — slot 1 is out of range
+        let code = &[MAKE, 1, GETL, 1, RET];
+        assert_eq!(run_err(code, &[]), VmError::LocalOutOfRange);
+    }
+
+    #[test]
+    fn setl_out_of_range() {
+        let code = &[MAKE, 1, CONST, 0, SETL, 2, RET];
+        assert_eq!(
+            run_err(code, &[Value::from_int(1)]),
+            VmError::LocalOutOfRange,
+        );
+    }
+
+    #[test]
+    fn getl_without_make_frame() {
+        // sp == 0, any slot is out of range
+        let code = &[GETL, 0, RET];
+        assert_eq!(run_err(code, &[]), VmError::LocalOutOfRange);
+    }
+
+    #[test]
+    fn local_survives_jump() {
+        // Set local, jump over dead code, read local back
+        //
+        // 0x00: MAKE 1         (2b)
+        // 0x02: CONST 0        (2b) → push 7
+        // 0x04: SETL 0         (2b)
+        // 0x06: JMP → 0x0D    (5b)
+        // 0x0B: CONST 1        (2b) → push 0, never reached
+        // 0x0D: GETL 0         (2b)
+        // 0x0F: RET
+        let [j0, j1, j2, j3] = jmp(0x0D);
+        let code = &[
+            MAKE, 1, CONST, 0, SETL, 0, JMP, j0, j1, j2, j3, CONST, 1, GETL, 0, RET,
+        ];
+        assert_val(
+            run_ok(code, &[Value::from_int(7), Value::from_int(0)]),
+            Value::from_int(7),
+        );
+    }
+
+    #[test]
+    fn local_mutated_in_true_branch() {
+        // if true { x = 42 } else { x = 0 }; return x
+        //
+        // 0x00: MAKE 1         (2b)
+        // 0x02: CONST 0        (2b) → push true
+        // 0x04: JIF → 0x0F    (5b) → jump to else if false
+        // 0x09: CONST 1        (2b) → push 42
+        // 0x0B: SETL 0         (2b) → x = 42
+        // 0x0D: JMP → 0x13    (5b) → jump past else
+        // 0x12: CONST 2        (2b) → push 0  [else branch]
+        // 0x14: SETL 0         (2b) → x = 0
+        // 0x16: GETL 0         (2b)
+        // 0x18: RET
+        //
+        // Wait — JMP at 0x0D is 5 bytes so else starts at 0x12.
+        // JIF target: 0x12. JMP target: 0x16.
+        let [jf0, jf1, jf2, jf3] = jmp(0x12);
+        let [js0, js1, js2, js3] = jmp(0x16);
+        let code = &[
+            MAKE, 1, // 0x00
+            CONST, 0, // 0x02
+            JIF, jf0, jf1, jf2, jf3, // 0x04
+            CONST, 1, SETL, 0, // 0x09
+            JMP, js0, js1, js2, js3, // 0x0D
+            CONST, 2, SETL, 0, // 0x12
+            GETL, 0,   // 0x16
+            RET, // 0x18
+        ];
+        assert_val(
+            run_ok(
+                code,
+                &[
+                    Value::from_bool(true),
+                    Value::from_int(42),
+                    Value::from_int(0),
+                ],
+            ),
+            Value::from_int(42),
+        );
+    }
+
+    #[test]
+    fn local_mutated_in_false_branch() {
+        // Same layout, condition is false → else branch runs
+        let [jf0, jf1, jf2, jf3] = jmp(0x12);
+        let [js0, js1, js2, js3] = jmp(0x16);
+        let code = &[
+            MAKE, 1, CONST, 0, JIF, jf0, jf1, jf2, jf3, CONST, 1, SETL, 0, JMP, js0, js1, js2, js3,
+            CONST, 2, SETL, 0, GETL, 0, RET,
+        ];
+        assert_val(
+            run_ok(
+                code,
+                &[
+                    Value::from_bool(false),
+                    Value::from_int(42),
+                    Value::from_int(0),
+                ],
+            ),
+            Value::from_int(0),
+        );
+    }
+
+    #[test]
+    fn counter_loop() {
+        // x = 0; while x < 3 { x = x + 1 }; return x
+        // Expected: 3
+        //
+        // 0x00: MAKE 1          (2b)
+        // 0x02: CONST 0         (2b) → push 0
+        // 0x04: SETL 0          (2b) → x = 0,  sp = 1
+        //
+        // loop top (0x06):
+        // 0x06: GETL 0          (2b) → push x
+        // 0x08: CONST 1         (2b) → push 3
+        // 0x0A: LT              (1b) → x < 3
+        // 0x0B: JIF → 0x1C     (5b) → exit when false
+        //
+        // loop body (0x10):
+        // 0x10: GETL 0          (2b) → push x
+        // 0x12: CONST 2         (2b) → push 1
+        // 0x14: ADD             (1b) → x + 1
+        // 0x15: SETL 0          (2b) → x = x + 1
+        // 0x17: JMP → 0x06     (5b) → back to top
+        //
+        // exit (0x1C):
+        // 0x1C: GETL 0          (2b)
+        // 0x1E: RET
+        let [je0, je1, je2, je3] = jmp(0x1C);
+        let [jb0, jb1, jb2, jb3] = jmp(0x06);
+        let code = &[
+            MAKE, 1, // 0x00
+            CONST, 0, SETL, 0, // 0x02
+            GETL, 0, // 0x06
+            CONST, 1,  // 0x08
+            LT, // 0x0A
+            JIF, je0, je1, je2, je3, // 0x0B
+            GETL, 0, // 0x10
+            CONST, 2,   // 0x12
+            ADD, // 0x14
+            SETL, 0, // 0x15
+            JMP, jb0, jb1, jb2, jb3, // 0x17
+            GETL, 0,   // 0x1C
+            RET, // 0x1E
+        ];
+        assert_val(
+            run_ok(
+                code,
+                &[
+                    Value::from_int(0), // pool[0]: initial value
+                    Value::from_int(3), // pool[1]: loop bound
+                    Value::from_int(1), // pool[2]: increment
+                ],
+            ),
+            Value::from_int(3),
+        );
     }
 }
