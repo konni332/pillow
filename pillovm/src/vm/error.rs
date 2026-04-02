@@ -14,4 +14,8 @@ pub enum VmError {
     IpOutOfBounds,
     /// GetLocal or SetLocal used a slot index outside the current frame
     LocalOutOfRange,
+    /// Call instruction exceeded CALL_STACK_MAX depth
+    CallStackOverflow,
+    /// Return instruction executed with no active call frame
+    CallStackUnderflow,
 }

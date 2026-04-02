@@ -1,16 +1,18 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+mod call_frame;
 mod error;
 mod operation;
 pub mod value;
 
 use crate::{
     bytecode::Bytecode,
-    vm::{error::VmError, operation::OpCode, value::Value},
+    vm::{call_frame::CallFrame, error::VmError, operation::OpCode, value::Value},
 };
 use core::mem::MaybeUninit;
 
 pub const STACK_MAX: usize = 1024;
+pub const CALL_STACK_MAX: usize = 128;
 
 pub struct Vm<'code> {
     /// Instruction pointer. Raw pointer into `code` for zero-cost increment.
@@ -21,17 +23,25 @@ pub struct Vm<'code> {
     sp: usize,
     /// Base pointer: index of the first local variable in current frame.
     bp: usize,
+    /// Callstack pointer: index of the current stack frame.
+    csp: usize,
     bytecode: &'code Bytecode<'code>,
     stack: [MaybeUninit<Value>; STACK_MAX],
+    call_stack: [MaybeUninit<CallFrame>; CALL_STACK_MAX],
 }
 
 unsafe fn create_stack() -> [MaybeUninit<Value>; STACK_MAX] {
     unsafe { MaybeUninit::uninit().assume_init() }
 }
 
+unsafe fn create_call_stack() -> [MaybeUninit<CallFrame>; CALL_STACK_MAX] {
+    unsafe { MaybeUninit::uninit().assume_init() }
+}
+
 impl<'code> Vm<'code> {
     pub fn new(bytecode: &'code Bytecode) -> Self {
         let stack = unsafe { create_stack() };
+        let call_stack = unsafe { create_call_stack() };
         let ip = bytecode.code.as_ptr();
         let ip_end = unsafe { ip.add(bytecode.code.len()) };
         Vm {
@@ -39,8 +49,10 @@ impl<'code> Vm<'code> {
             ip_end,
             bytecode,
             stack,
+            call_stack,
             sp: 0,
             bp: 0,
+            csp: 0,
         }
     }
 
@@ -64,12 +76,31 @@ impl<'code> Vm<'code> {
 
         Ok(unsafe { self.stack[self.sp].as_ptr().read() })
     }
-    #[inline]
+    #[inline(always)]
     fn peek(&self) -> Result<Value, VmError> {
         if self.sp == 0 {
             return Err(VmError::StackUnderflow);
         }
         Ok(unsafe { self.stack[self.sp - 1].as_ptr().read() })
+    }
+    #[inline(always)]
+    fn push_frame(&mut self, frame: CallFrame) -> Result<(), VmError> {
+        if self.csp == CALL_STACK_MAX {
+            return Err(VmError::CallStackOverflow);
+        }
+        unsafe {
+            self.call_stack[self.csp].as_mut_ptr().write(frame);
+        }
+        self.csp += 1;
+        Ok(())
+    }
+    #[inline(always)]
+    fn pop_frame(&mut self) -> Result<CallFrame, VmError> {
+        if self.csp == 0 {
+            return Err(VmError::CallStackUnderflow);
+        }
+        self.csp -= 1;
+        Ok(unsafe { self.call_stack[self.csp].as_ptr().read() })
     }
 
     #[inline(always)]
@@ -318,6 +349,52 @@ impl<'code> Vm<'code> {
         Ok(())
     }
 
+    #[inline(always)]
+    fn op_call(&mut self) -> Result<(), VmError> {
+        let offset = self.read_u32()? as usize;
+        if offset >= self.bytecode.code.len() {
+            return Err(VmError::IpOutOfBounds);
+        }
+
+        let arg_count = self.read_byte()? as usize;
+        if self.sp < arg_count {
+            return Err(VmError::StackUnderflow);
+        }
+
+        let frame = CallFrame {
+            saved_ip: self.ip,
+            saved_ip_end: self.ip_end,
+            saved_bp: self.bp,
+            saved_sp: self.sp - arg_count,
+        };
+        self.push_frame(frame)?;
+
+        self.bp = self.sp - arg_count;
+        self.ip = unsafe { self.bytecode.code.as_ptr().add(offset) };
+        self.ip_end = unsafe { self.bytecode.code.as_ptr().add(self.bytecode.code.len()) };
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn op_return(&mut self) -> Result<Option<Value>, VmError> {
+        let retval = self.pop()?;
+
+        if self.csp == 0 {
+            return Ok(Some(retval));
+        }
+
+        let frame = self.pop_frame()?;
+        self.ip = frame.saved_ip;
+        self.ip_end = frame.saved_ip_end;
+        self.bp = frame.saved_bp;
+        self.sp = frame.saved_sp;
+
+        self.push(retval)?;
+
+        Ok(None)
+    }
+
     pub fn run(&mut self) -> Result<Value, VmError> {
         loop {
             let byte = self.read_byte()?;
@@ -361,8 +438,11 @@ impl<'code> Vm<'code> {
                 OpCode::GetLocal => self.op_get_local()?,
                 OpCode::SetLocal => self.op_set_local()?,
 
+                OpCode::Call => self.op_call()?,
                 OpCode::Return => {
-                    return self.peek();
+                    if let Some(val) = self.op_return()? {
+                        return Ok(val);
+                    }
                 }
             }
         }
@@ -438,6 +518,7 @@ mod tests {
     const MAKE: u8 = 0x14;
     const GETL: u8 = 0x15;
     const SETL: u8 = 0x16;
+    const CALL: u8 = 0x17;
 
     /// Encode a u32 jump target as 4 big-endian bytes.
     /// Use as: `&[JMP, ...jmp(0x09)]` — spread into the byte slice.
@@ -1739,6 +1820,118 @@ mod tests {
                 ],
             ),
             Value::from_int(3),
+        );
+    }
+    #[test]
+    fn call_no_args_returns_constant() {
+        // fn foo() -> 42
+        // call foo(); return result
+        //
+        // main (offset 0x00):
+        // 0x00: CALL → 0x07, args=0    (6b)
+        // 0x06: RET                    (1b)
+        //
+        // foo (offset 0x07):
+        // 0x07: MAKE 0                 (2b)
+        // 0x09: CONST 0                (2b) → push 42
+        // 0x0B: RET                    (1b)
+        let [e0, e1, e2, e3] = jmp(0x07);
+        let code = &[
+            CALL, e0, e1, e2, e3, 0,   // 0x00 — 0 args
+            RET, // 0x06
+            MAKE, 0, // 0x07
+            CONST, 0,   // 0x09
+            RET, // 0x0B
+        ];
+        assert_val(
+            run(code, &[Value::from_int(42)]).unwrap(),
+            Value::from_int(42),
+        );
+    }
+
+    #[test]
+    fn call_with_args() {
+        // fn add(a, b) -> a + b
+        // call add(10, 32); return result
+        //
+        // main (0x00):
+        // 0x00: CONST 0                (2b) → push 10
+        // 0x02: CONST 1                (2b) → push 32
+        // 0x04: CALL → 0x0B, args=2   (6b)
+        // 0x0A: RET                    (1b)
+        //
+        // add (0x0B):
+        // 0x0B: MAKE 0                 (2b) — no extra locals, args are local[0..1]
+        // 0x0D: GETL 0                 (2b) → push a
+        // 0x0F: GETL 1                 (2b) → push b
+        // 0x11: ADD                    (1b)
+        // 0x12: RET
+        let [e0, e1, e2, e3] = jmp(0x0B);
+        let code = &[
+            CONST, 0, // 0x00
+            CONST, 1, // 0x02
+            CALL, e0, e1, e2, e3, 2,   // 0x04 — 2 args
+            RET, // 0x0A
+            MAKE, 0, // 0x0B
+            GETL, 0, // 0x0D
+            GETL, 1,   // 0x0F
+            ADD, // 0x11
+            RET, // 0x12
+        ];
+        assert_val(
+            run(code, &[Value::from_int(10), Value::from_int(32)]).unwrap(),
+            Value::from_int(42),
+        );
+    }
+
+    #[test]
+    fn call_args_are_consumed_from_caller_stack() {
+        let [e0, e1, e2, e3] = jmp(0x0C);
+        let code = &[
+            CONST, 0, // 0x00
+            CALL, e0, e1, e2, e3, 1, // 0x02
+            CONST, 1,   // 0x08
+            ADD, // 0x0A
+            RET, // 0x0B
+            MAKE, 0, // 0x0C
+            GETL, 0, // 0x0E
+            GETL, 0,   // 0x10
+            ADD, // 0x12
+            RET, // 0x13
+        ];
+        assert_val(
+            run(code, &[Value::from_int(1), Value::from_int(3)]).unwrap(),
+            Value::from_int(5),
+        );
+    }
+
+    #[test]
+    fn call_stack_overflow() {
+        // Infinite recursion — fn inf() { inf() }
+        // Should hit CallStackOverflow, not smash memory.
+        //
+        // 0x00: CALL → 0x00, args=0   (6b) — calls itself forever
+        // 0x06: RET
+        let [e0, e1, e2, e3] = jmp(0x00);
+        let code = &[CALL, e0, e1, e2, e3, 0, RET];
+        assert_eq!(run(code, &[]).unwrap_err(), VmError::CallStackOverflow,);
+    }
+
+    #[test]
+    fn call_bad_offset_errors() {
+        let [e0, e1, e2, e3] = jmp(0xFFFF_FFFF);
+        let code = &[CALL, e0, e1, e2, e3, 0, RET];
+        assert_eq!(run(code, &[]).unwrap_err(), VmError::IpOutOfBounds,);
+    }
+
+    #[test]
+    fn call_too_few_args_errors() {
+        // Call claims 2 args but stack only has 1
+        let [e0, e1, e2, e3] = jmp(0x08);
+        let code = &[CONST, 0, CALL, e0, e1, e2, e3, 2, RET, MAKE, 0, RET];
+        assert_eq!(
+            run(code, &[Value::from_int(1)]).unwrap_err(),
+            VmError::StackUnderflow,
         );
     }
 }
