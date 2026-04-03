@@ -18,4 +18,6 @@ pub enum VmError {
     CallStackOverflow,
     /// Return instruction executed with no active call frame
     CallStackUnderflow,
+    /// Allocator returned None, heap is exhausted.
+    OutOfMemory,
 }

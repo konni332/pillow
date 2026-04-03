@@ -2,19 +2,31 @@
 
 mod call_frame;
 mod error;
+mod heap;
 mod operation;
 pub mod value;
 
 use crate::{
     bytecode::Bytecode,
-    vm::{call_frame::CallFrame, error::VmError, operation::OpCode, value::Value},
+    vm::{
+        call_frame::CallFrame,
+        error::VmError,
+        heap::{Allocator, Gc, RootTracer},
+        operation::OpCode,
+        value::Value,
+    },
 };
 use core::mem::MaybeUninit;
+use std::ptr::NonNull;
 
 pub const STACK_MAX: usize = 1024;
 pub const CALL_STACK_MAX: usize = 128;
 
-pub struct Vm<'code> {
+pub struct Vm<'code, A, G>
+where
+    A: Allocator,
+    G: Gc<A>,
+{
     /// Instruction pointer. Raw pointer into `code` for zero-cost increment.
     ip: *const u8,
     /// Points one past the last byte of code, for bounds checks.
@@ -28,6 +40,9 @@ pub struct Vm<'code> {
     bytecode: &'code Bytecode<'code>,
     stack: [MaybeUninit<Value>; STACK_MAX],
     call_stack: [MaybeUninit<CallFrame>; CALL_STACK_MAX],
+
+    alloc: A,
+    gc: G,
 }
 
 unsafe fn create_stack() -> [MaybeUninit<Value>; STACK_MAX] {
@@ -38,8 +53,12 @@ unsafe fn create_call_stack() -> [MaybeUninit<CallFrame>; CALL_STACK_MAX] {
     unsafe { MaybeUninit::uninit().assume_init() }
 }
 
-impl<'code> Vm<'code> {
-    pub fn new(bytecode: &'code Bytecode) -> Self {
+impl<'code, A, G> Vm<'code, A, G>
+where
+    A: Allocator,
+    G: Gc<A>,
+{
+    pub fn new(bytecode: &'code Bytecode, alloc: A, gc: G) -> Self {
         let stack = unsafe { create_stack() };
         let call_stack = unsafe { create_call_stack() };
         let ip = bytecode.code.as_ptr();
@@ -53,6 +72,8 @@ impl<'code> Vm<'code> {
             sp: 0,
             bp: 0,
             csp: 0,
+            alloc,
+            gc,
         }
     }
 
@@ -113,6 +134,27 @@ impl<'code> Vm<'code> {
             self.ip = self.ip.add(1);
             Ok(byte)
         }
+    }
+
+    /// Allocate a heap object, triggering GC first if neeed.
+    /// Returns a Value with TAG_OBJ encoding the raw pointer.
+    #[inline]
+    fn heap_alloc(&mut self, size: usize, contains_values: bool) -> Result<Value, VmError> {
+        if self.gc.should_collect(&self.alloc) {
+            debug_assert!(!self.gc.in_nogc(), "GC triggered inside nogc block");
+            // SAFETY: RootTracer impl below correctly enumerates all roots
+            let mut tracer = VmRootTracer {
+                stack: &self.stack,
+                sp: self.sp,
+            };
+            self.gc.collect(&mut self.alloc, &mut tracer);
+        }
+
+        let allocation = self
+            .alloc
+            .alloc(size, contains_values)
+            .ok_or(VmError::OutOfMemory)?;
+        Ok(Value::from_obj(allocation.ptr.as_ptr() as u64))
     }
 
     // Arithmetic dispatch
@@ -482,6 +524,28 @@ mod utils {
             return (bi as f64) == af;
         }
         false
+    }
+}
+
+/// RootTracer implementation. Walks the live portion of the value stack and calls `visit` for
+/// every Value that encodes a heap pointer.
+struct VmRootTracer<'a> {
+    stack: &'a [MaybeUninit<Value>; STACK_MAX],
+    sp: usize,
+}
+
+impl<'a> RootTracer for VmRootTracer<'a> {
+    fn trace_roots(&mut self, visit: &mut dyn FnMut(std::ptr::NonNull<u8>)) {
+        for i in 0..self.sp {
+            let val = unsafe { self.stack[i].assume_init() };
+            if let Some(raw) = val.as_obj() {
+                // SAFETY: as_obj only returns Some for TAG_OBJ values, which are placed there by
+                // heap_alloc and are valid NonNull<u8> pointers for the lifetime of the allocation
+                if let Some(ptr) = NonNull::new(raw as *mut u8) {
+                    visit(ptr);
+                }
+            }
+        }
     }
 }
 

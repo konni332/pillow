@@ -74,12 +74,12 @@ impl Value {
     }
 
     #[inline]
-    pub fn from_obj(idx: u64) -> Self {
+    pub fn from_obj(ptr: u64) -> Self {
         debug_assert!(
-            idx <= PAYLOAD_MASK,
-            "arena index {idx} exceeds 48-bit range"
+            ptr <= PAYLOAD_MASK,
+            "heap pointer 0x{ptr:x} exceeds 48-bit payload"
         );
-        Self(QNAN_BASE | TAG_OBJ | idx)
+        Self(QNAN_BASE | TAG_OBJ | ptr)
     }
 
     /// True for any f64 that is not one of our tagged sentinels.
