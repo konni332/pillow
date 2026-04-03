@@ -1,5 +1,8 @@
 use core::ptr::NonNull;
 
+mod bump;
+pub use bump::BumpAllocator;
+
 /// Result of an allocation request.
 pub struct Allocation {
     /// Pointer to the first usable of the allocation.
@@ -102,4 +105,3 @@ pub unsafe trait Allocator {
     /// entirely for non-moving allocators.
     fn is_moving() -> bool;
 }
-

@@ -437,6 +437,17 @@ where
         Ok(None)
     }
 
+    #[inline(always)]
+    fn op_enter_no_gc(&mut self) -> Result<(), VmError> {
+        self.gc.enter_nogc();
+        Ok(())
+    }
+    #[inline(always)]
+    fn op_exit_no_gc(&mut self) -> Result<(), VmError> {
+        self.gc.exit_nogc();
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<Value, VmError> {
         loop {
             let byte = self.read_byte()?;
@@ -486,6 +497,8 @@ where
                         return Ok(val);
                     }
                 }
+                OpCode::EnterNoGc => self.op_enter_no_gc()?,
+                OpCode::ExitNoGc => self.op_exit_no_gc()?,
             }
         }
     }
@@ -554,6 +567,7 @@ mod tests {
     use core::f64;
 
     use crate::bytecode::Bytecode;
+    use crate::vm::heap::BumpAllocator;
     use crate::vm::value::Value;
     use crate::vm::{STACK_MAX, Vm, VmError};
 
@@ -596,7 +610,8 @@ mod tests {
     }
 
     fn run(code: &[u8], constants: &[Value]) -> Result<Value, VmError> {
-        Vm::new(&Bytecode::new(code, constants)).run()
+        let allocator = BumpAllocator::new();
+        Vm::new(&Bytecode::new(code, constants), allocator).run()
     }
 
     fn run_ok(code: &[u8], constants: &[Value]) -> Value {

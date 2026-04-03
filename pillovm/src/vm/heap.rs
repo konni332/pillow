@@ -1,5 +1,5 @@
 mod allocator;
 mod gc;
 
-pub use allocator::{Allocation, Allocator};
+pub use allocator::{Allocator, BumpAllocator};
 pub use gc::{Gc, RootTracer};

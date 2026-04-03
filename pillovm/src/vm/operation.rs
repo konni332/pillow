@@ -50,6 +50,10 @@ pub enum OpCode {
     /// Call a Pillow function.
     /// Operands: u32 offset into bytecode (entry point), u8 arg count.
     Call = 0x17,
+
+    // Gc
+    EnterNoGc = 0x18,
+    ExitNoGc = 0x19,
 }
 
 impl OpCode {
@@ -80,6 +84,8 @@ impl OpCode {
             0x15 => Some(Self::GetLocal),
             0x16 => Some(Self::SetLocal),
             0x17 => Some(Self::Call),
+            0x18 => Some(Self::EnterNoGc),
+            0x19 => Some(Self::ExitNoGc),
             _ => None,
         }
     }
