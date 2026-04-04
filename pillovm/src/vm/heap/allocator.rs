@@ -3,6 +3,11 @@ use core::ptr::NonNull;
 mod bump;
 pub use bump::BumpAllocator;
 
+#[cfg(any(feature = "std", feature = "alloc"))]
+mod native;
+#[cfg(any(feature = "std", feature = "alloc"))]
+pub use native::NativeAllocator;
+
 /// Result of an allocation request.
 pub struct Allocation {
     /// Pointer to the first usable of the allocation.
@@ -70,16 +75,6 @@ pub unsafe trait Allocator {
     /// `ptr` must be a live allocation owned by this allocator.
     unsafe fn is_traced(&self, ptr: NonNull<u8>) -> bool;
 
-    /// Visit every live allocation in an unspecified order.
-    ///
-    /// The GC calls this during the mark phase to seed the mark
-    /// worklist, and during sweep to find unreachable allocations.
-    /// The callback receives the pointer and recorded size.
-    ///
-    /// The allocator must not be mutated during iteration — the
-    /// callback must not call `alloc` or `free`.
-    fn for_each_live(&self, f: &mut dyn FnMut(NonNull<u8>, usize));
-
     /// Inform a bump allocator that everything above `new_top` is
     /// dead and the bump pointer can be reset.
     ///
@@ -112,7 +107,16 @@ pub unsafe trait Allocator {
 
     unsafe fn set_marked(&mut self, ptr: NonNull<u8>, marked: bool);
     unsafe fn is_marked(&self, ptr: NonNull<u8>) -> bool;
+}
 
-    /// Returns the maximum heap size;
-    fn heap_size(&self) -> usize;
+pub trait WalkableAllocator: Allocator {
+    /// Visit every live allocation in an unspecified order.
+    ///
+    /// The GC calls this during the mark phase to seed the mark
+    /// worklist, and during sweep to find unreachable allocations.
+    /// The callback receives the pointer and recorded size.
+    ///
+    /// The allocator must not be mutated during iteration — the
+    /// callback must not call `alloc` or `free`.
+    fn for_each_live(&self, f: &mut dyn FnMut(NonNull<u8>, usize));
 }

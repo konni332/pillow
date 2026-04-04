@@ -5,7 +5,7 @@ edition = "2024"
 
 [features]
 default = ["std"]
-std = []
+std = ["alloc"]
 alloc = []
 
 [dependencies]

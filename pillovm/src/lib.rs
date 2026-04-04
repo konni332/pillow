@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(feature = "alloc")]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 extern crate alloc;
 
 mod bytecode;

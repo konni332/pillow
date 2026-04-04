@@ -1,5 +1,5 @@
 use crate::vm::{
-    heap::{Allocator, Gc},
+    heap::{Allocator, Gc, allocator::WalkableAllocator},
     value::{PAYLOAD_MASK, QNAN_BASE, TAG_OBJ},
 };
 use core::ptr::NonNull;
@@ -85,7 +85,7 @@ struct MarkBit {
     marked: bool,
 }
 
-impl<A: Allocator> Gc<A> for MarkSweep {
+impl<A: WalkableAllocator> Gc<A> for MarkSweep {
     fn should_collect(&self, alloc: &A) -> bool {
         if self.nogc_depth > 0 {
             return false;

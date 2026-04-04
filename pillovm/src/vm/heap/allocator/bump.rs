@@ -2,6 +2,7 @@ use core::mem;
 use core::ptr::NonNull;
 
 use crate::vm::heap::Allocator;
+use crate::vm::heap::allocator::WalkableAllocator;
 
 /// Stored immediately before every allocations usable bytes.
 /// Recovered by the GC via `ptr.sub(HEADER_SIZE)`.
@@ -111,21 +112,6 @@ unsafe impl<const N: usize> Allocator for BumpAllocator<N> {
         unsafe { (*Self::header_of(ptr)).marked = marked };
     }
 
-    fn for_each_live(&self, f: &mut dyn FnMut(NonNull<u8>, usize)) {
-        let mut offset = 0usize;
-        while offset < self.bump {
-            let header_ptr = unsafe { self.heap.as_ptr().add(offset) as *const Header };
-            let header = unsafe { &*header_ptr };
-            let size = header.size as usize;
-            let aligned_size = (size + 7) & !7;
-            let user_ptr = unsafe {
-                NonNull::new_unchecked(self.heap.as_ptr().add(offset + HEADER_SIZE) as *mut u8)
-            };
-            f(user_ptr, size);
-            offset += HEADER_SIZE + aligned_size;
-        }
-    }
-
     unsafe fn reset_bump(&mut self, new_top: NonNull<u8>) {
         let base = self.heap.as_ptr() as usize;
         let new_top = new_top.as_ptr() as usize;
@@ -144,8 +130,21 @@ unsafe impl<const N: usize> Allocator for BumpAllocator<N> {
     fn bytes_used(&self) -> usize {
         self.bump
     }
+}
 
-    fn heap_size(&self) -> usize {
-        N
+impl<const N: usize> WalkableAllocator for BumpAllocator<N> {
+    fn for_each_live(&self, f: &mut dyn FnMut(NonNull<u8>, usize)) {
+        let mut offset = 0usize;
+        while offset < self.bump {
+            let header_ptr = unsafe { self.heap.as_ptr().add(offset) as *const Header };
+            let header = unsafe { &*header_ptr };
+            let size = header.size as usize;
+            let aligned_size = (size + 7) & !7;
+            let user_ptr = unsafe {
+                NonNull::new_unchecked(self.heap.as_ptr().add(offset + HEADER_SIZE) as *mut u8)
+            };
+            f(user_ptr, size);
+            offset += HEADER_SIZE + aligned_size;
+        }
     }
 }

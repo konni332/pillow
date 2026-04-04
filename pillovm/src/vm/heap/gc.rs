@@ -22,6 +22,10 @@ pub trait RootTracer {
 /// `A: Allocator`. Neither the GC nor the allocator owns the other.
 /// The VM owns both and passes the allocator into GC operations.
 ///
+/// If the GC implementation needs to walk the heap, the allocator used, needs to implement the
+/// WalkableAllocator trait as well. This is done to save unnecessary metadata in case of
+/// unwalkable allocators, such as the NativeAllocator.
+///
 /// Implementable as:
 ///   - Stop-the-world mark-and-sweep
 ///   - Incremental mark-and-sweep (bounded work per `collect` call)
