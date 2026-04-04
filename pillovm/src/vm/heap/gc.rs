@@ -1,7 +1,8 @@
-// vm/heap/gc.rs
-
 use super::allocator::Allocator;
 use core::ptr::NonNull;
+
+mod mark_sweep;
+pub use mark_sweep::MarkSweep;
 
 /// Called by the GC during the mark phase to enumerate root Values.
 /// The VM implements this. It walks the value stack, call stack

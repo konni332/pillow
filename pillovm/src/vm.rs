@@ -567,7 +567,7 @@ mod tests {
     use core::f64;
 
     use crate::bytecode::Bytecode;
-    use crate::vm::heap::BumpAllocator;
+    use crate::vm::heap::{Allocator, BumpAllocator, MarkSweep};
     use crate::vm::value::Value;
     use crate::vm::{STACK_MAX, Vm, VmError};
 
@@ -610,8 +610,11 @@ mod tests {
     }
 
     fn run(code: &[u8], constants: &[Value]) -> Result<Value, VmError> {
-        let allocator = BumpAllocator::new();
-        Vm::new(&Bytecode::new(code, constants), allocator).run()
+        const HEAP_SIZE: usize = 1024 * 8;
+        const THRESHOLD: usize = (HEAP_SIZE / 4) * 3;
+        let allocator: BumpAllocator<HEAP_SIZE> = BumpAllocator::new();
+        let gc = MarkSweep::new(THRESHOLD);
+        Vm::new(&Bytecode::new(code, constants), allocator, gc).run()
     }
 
     fn run_ok(code: &[u8], constants: &[Value]) -> Value {

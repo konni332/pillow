@@ -18,17 +18,17 @@
 //   tag 0b010 => int       payload: 48-bit two's complement signed integer
 //   tag 0b011 => obj       payload: 48-bit arena index
 
-const QNAN_BASE: u64 = 0x7FF8_0000_0000_0000;
-const SIGN_BIT: u64 = 0x8000_0000_0000_0000;
-const TAG_MASK: u64 = 0x0007_0000_0000_0000;
-const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
+pub const QNAN_BASE: u64 = 0x7FF8_0000_0000_0000;
+pub const SIGN_BIT: u64 = 0x8000_0000_0000_0000;
+pub const TAG_MASK: u64 = 0x0007_0000_0000_0000;
+pub const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 
-const TAG_NIL: u64 = 0x0000_0000_0000_0000;
-const TAG_BOOL: u64 = 0x0001_0000_0000_0000;
-const TAG_INT: u64 = 0x0002_0000_0000_0000;
-const TAG_OBJ: u64 = 0x0003_0000_0000_0000;
+pub const TAG_NIL: u64 = 0x0000_0000_0000_0000;
+pub const TAG_BOOL: u64 = 0x0001_0000_0000_0000;
+pub const TAG_INT: u64 = 0x0002_0000_0000_0000;
+pub const TAG_OBJ: u64 = 0x0003_0000_0000_0000;
 
-const CANON_NAN: u64 = QNAN_BASE;
+pub const CANON_NAN: u64 = QNAN_BASE;
 
 pub const CANON_NAN_BITS: u64 = 0xFFF8_0000_0000_0000;
 

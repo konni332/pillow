@@ -103,6 +103,14 @@ unsafe impl<const N: usize> Allocator for BumpAllocator<N> {
         unsafe { (*Self::header_of(ptr)).contains_values }
     }
 
+    unsafe fn is_marked(&self, ptr: NonNull<u8>) -> bool {
+        unsafe { (*Self::header_of(ptr)).marked }
+    }
+
+    unsafe fn set_marked(&mut self, ptr: NonNull<u8>, marked: bool) {
+        unsafe { (*Self::header_of(ptr)).marked = marked };
+    }
+
     fn for_each_live(&self, f: &mut dyn FnMut(NonNull<u8>, usize)) {
         let mut offset = 0usize;
         while offset < self.bump {
@@ -131,5 +139,13 @@ unsafe impl<const N: usize> Allocator for BumpAllocator<N> {
     fn is_moving() -> bool {
         true
     }
-}
 
+    /// Bump allocators bytes used includes allocation headers.
+    fn bytes_used(&self) -> usize {
+        self.bump
+    }
+
+    fn heap_size(&self) -> usize {
+        N
+    }
+}

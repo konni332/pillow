@@ -104,4 +104,15 @@ pub unsafe trait Allocator {
     /// This is a const fn so the compiler can eliminate the check
     /// entirely for non-moving allocators.
     fn is_moving() -> bool;
+
+    /// Bytes currently allocated(Whether it excludes or includes headers is implementation
+    /// dependent. See specific Allocators documentation for more specific information).
+    /// Allows GC threshold checks without walking the heap.
+    fn bytes_used(&self) -> usize;
+
+    unsafe fn set_marked(&mut self, ptr: NonNull<u8>, marked: bool);
+    unsafe fn is_marked(&self, ptr: NonNull<u8>) -> bool;
+
+    /// Returns the maximum heap size;
+    fn heap_size(&self) -> usize;
 }
