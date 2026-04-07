@@ -13,6 +13,7 @@ use crate::{
         error::VmError,
         heap::{Allocator, Gc, RootTracer},
         operation::OpCode,
+        utils::obj_to_ptr,
         value::Value,
     },
 };
@@ -448,6 +449,64 @@ where
         Ok(())
     }
 
+    #[inline(always)]
+    fn op_alloc(&mut self) -> Result<(), VmError> {
+        let size: u16 = ((self.read_byte()? as u16) << 8) | self.read_byte()? as u16;
+        let contains_values = self.read_byte()? != 0u8;
+        let val = self.heap_alloc(size as usize, contains_values)?;
+        self.push(val)
+    }
+
+    #[inline(always)]
+    fn op_load(&mut self) -> Result<(), VmError> {
+        let offset = self.pop()?;
+        let obj = self.pop()?;
+        let raw_ptr = obj_to_ptr(obj)?;
+        let offset = offset.as_int().ok_or(VmError::TypeError)? as usize;
+        // SAFETY: the compiler is responsible for emitting valid offsets.
+        let bits: u64 =
+            unsafe { core::ptr::read_unaligned(raw_ptr.as_ptr().add(offset) as *const u64) };
+        self.push(unsafe { Value::from_bits(bits) })
+    }
+
+    #[inline(always)]
+    fn op_store(&mut self) -> Result<(), VmError> {
+        let value = self.pop()?;
+        let offset = self.pop()?;
+        let obj = self.pop()?;
+        let raw_ptr = obj_to_ptr(obj)?;
+        let offset = offset.as_int().ok_or(VmError::TypeError)? as usize;
+
+        unsafe {
+            core::ptr::write_unaligned(raw_ptr.as_ptr().add(offset) as *mut u64, value.to_bits());
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn op_load_byte(&mut self) -> Result<(), VmError> {
+        let offset = self.pop()?;
+        let obj = self.pop()?;
+        let raw_ptr = obj_to_ptr(obj)?;
+        let offset = offset.as_int().ok_or(VmError::TypeError)? as usize;
+        let byte = unsafe { *raw_ptr.as_ptr().add(offset) };
+        self.push(Value::from_int(byte as i64))
+    }
+
+    #[inline(always)]
+    fn op_store_byte(&mut self) -> Result<(), VmError> {
+        let value = self.pop()?;
+        let offset = self.pop()?;
+        let obj = self.pop()?;
+        let raw_ptr = obj_to_ptr(obj)?;
+        let offset = offset.as_int().ok_or(VmError::TypeError)? as usize;
+        let byte = value.as_int().ok_or(VmError::TypeError)?;
+        unsafe {
+            *raw_ptr.as_ptr().add(offset) = byte as u8;
+        }
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<Value, VmError> {
         loop {
             let byte = self.read_byte()?;
@@ -499,12 +558,19 @@ where
                 }
                 OpCode::EnterNoGc => self.op_enter_no_gc()?,
                 OpCode::ExitNoGc => self.op_exit_no_gc()?,
+
+                OpCode::Alloc => self.op_alloc()?,
+                OpCode::Load => self.op_load()?,
+                OpCode::Store => self.op_store()?,
+                OpCode::LoadB => self.op_load_byte()?,
+                OpCode::StoreB => self.op_store_byte()?,
             }
         }
     }
 }
 
 mod utils {
+    use crate::vm::error::VmError;
     use crate::vm::value::CANON_NAN_BITS;
     use crate::vm::value::Value;
 
@@ -516,7 +582,7 @@ mod utils {
     ///   int  == int          -> numeric
     ///   float == float       -> bitwise (NaN != NaN, matching IEEE 754)
     ///   int  == float        -> widen int to float, then compare
-    ///   obj  == obj          -> identity (same arena index)
+    ///   obj  == obj          -> identity (same pointer and size value)
     ///   mixed non-numeric    -> false (never a TypeError! Equality is total)
     #[inline]
     pub(super) fn values_equal(a: Value, b: Value) -> bool {
@@ -537,6 +603,16 @@ mod utils {
             return (bi as f64) == af;
         }
         false
+    }
+
+    use core::ptr::NonNull;
+
+    #[inline(always)]
+    pub(super) fn obj_to_ptr(val: Value) -> Result<NonNull<u8>, VmError> {
+        match val.as_obj() {
+            Some(ptr) => NonNull::new(ptr as *mut u8).ok_or(VmError::Segfault),
+            None => Err(VmError::TypeError),
+        }
     }
 }
 

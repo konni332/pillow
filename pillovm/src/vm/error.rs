@@ -20,4 +20,6 @@ pub enum VmError {
     CallStackUnderflow,
     /// Allocator returned None, heap is exhausted.
     OutOfMemory,
+    /// Tried to access invalid memory.
+    Segfault,
 }

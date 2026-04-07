@@ -54,6 +54,19 @@ pub enum OpCode {
     // Gc
     EnterNoGc = 0x18,
     ExitNoGc = 0x19,
+
+    // Heap
+    /// Reads size: u16, then contains_values flag: u8, allocates memory and pushes the obj pionter
+    Alloc = 0x1A,
+    /// Pops offset, pops obj pointer, pushes 8-byte Value from offset
+    Load = 0x1B,
+    /// Pops value, pops offset, pops obj, writes 8-bytes at that offset
+    Store = 0x1C,
+    /// Pops offset, pops obj pointer, pushes 1-byte as int from offset
+    LoadB = 0x1D,
+    /// Pops value, pops offset, pops obj, writes least significant byte from value at that offset. Value
+    /// must be int
+    StoreB = 0x1E,
 }
 
 impl OpCode {
@@ -86,6 +99,11 @@ impl OpCode {
             0x17 => Some(Self::Call),
             0x18 => Some(Self::EnterNoGc),
             0x19 => Some(Self::ExitNoGc),
+            0x1A => Some(Self::Alloc),
+            0x1B => Some(Self::Load),
+            0x1C => Some(Self::Store),
+            0x1D => Some(Self::LoadB),
+            0x1E => Some(Self::StoreB),
             _ => None,
         }
     }

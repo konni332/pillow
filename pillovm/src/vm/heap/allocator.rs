@@ -13,7 +13,7 @@ pub struct Allocation {
     /// Pointer to the first usable of the allocation.
     /// This is what gets stored (as an offset or raw ptr) in a Value.
     pub ptr: NonNull<u8>,
-    /// Actual size of the allocation inbytes, as recorded by the allocator.
+    /// Actual size of the allocation in bytes, as recorded by the allocator.
     /// May be >= the requested size depending on alignment.
     pub size: usize,
 }
