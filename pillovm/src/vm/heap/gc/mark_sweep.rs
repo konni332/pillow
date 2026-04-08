@@ -1,7 +1,6 @@
-use crate::vm::{
-    heap::{Allocator, Gc, allocator::WalkableAllocator},
-    value::{PAYLOAD_MASK, QNAN_BASE, TAG_OBJ},
-};
+use pillow_nan::{PAYLOAD_MASK, QNAN_BASE, TAG_OBJ};
+
+use crate::vm::heap::{Allocator, Gc, allocator::WalkableAllocator};
 use core::ptr::NonNull;
 
 /// Capacity of the mark worklist.

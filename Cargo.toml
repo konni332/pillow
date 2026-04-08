@@ -1,2 +1,3 @@
 [workspace]
-members = ["pillovm"]
+members = ["pillovm", "pillow-nan", "pillow-pack"]
+resolver = "3"

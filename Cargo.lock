@@ -5,3 +5,18 @@ version = 4
 [[package]]
 name = "pillovm"
 version = "0.1.0"
+dependencies = [
+ "pillow-nan",
+ "pillow-pack",
+]
+
+[[package]]
+name = "pillow-nan"
+version = "0.1.0"
+
+[[package]]
+name = "pillow-pack"
+version = "0.1.0"
+dependencies = [
+ "pillow-nan",
+]

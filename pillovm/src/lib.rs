@@ -3,5 +3,4 @@
 #[cfg(all(not(feature = "std"), feature = "alloc"))]
 extern crate alloc;
 
-mod bytecode;
 mod vm;

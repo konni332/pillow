@@ -1,22 +1,20 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-
-// The NaN-boxing scheme:
-//
-// 63    62-52    51    50-48    47-0
-// S     exp      Q     tag      payload
-//
-// A value is a FLOAT if bits 62-52 are NOT all 1s (i.e. not a NaN/inf).
-// A value is TAGGED if bits 62-52 are all 1s AND bit 51 (quiet) is 1
-// AND bit 63 (sign) is 0. This gives us 3 tag bits (bits 50-48) and
-// a 48-bit payload.
-//
-// Incoming f64 NaNs are canonicalized to CANON_NAN so they never collide with our tag space.
-//
-// Tagged base: 0x7FF8_0000_0000_0000
-//   tag 0b000 => nil
-//   tag 0b001 => bool      payload: 0 or 1
-//   tag 0b010 => int       payload: 48-bit two's complement signed integer
-//   tag 0b011 => obj       payload: 48-bit arena index
+//! The NaN-boxing scheme:
+//!
+//! 63    62-52    51    50-48    47-0
+//! S     exp      Q     tag      payload
+//!
+//! A value is a FLOAT if bits 62-52 are NOT all 1s (i.e. not a NaN/inf).
+//! A value is TAGGED if bits 62-52 are all 1s AND bit 51 (quiet) is 1
+//! AND bit 63 (sign) is 0. This gives us 3 tag bits (bits 50-48) and
+//! a 48-bit payload.
+//!
+//! Incoming f64 NaNs are canonicalized to CANON_NAN so they never collide with our tag space.
+//!
+//! Tagged base: 0x7FF8_0000_0000_0000
+//!   tag 0b000 => nil
+//!   tag 0b001 => bool      payload: 0 or 1
+//!   tag 0b010 => int       payload: 48-bit two's complement signed integer
+//!   tag 0b011 => obj       payload: 48-bit arena index
 
 pub const QNAN_BASE: u64 = 0x7FF8_0000_0000_0000;
 pub const SIGN_BIT: u64 = 0x8000_0000_0000_0000;
@@ -157,6 +155,9 @@ impl Value {
         self.0
     }
 
+    /// # SAFETY
+    /// Caller needs to guarantee that `bits: u64` is a valid Value according to the defined
+    /// NaN-boxing scheme.
     #[inline]
     pub unsafe fn from_bits(bits: u64) -> Self {
         Self(bits)

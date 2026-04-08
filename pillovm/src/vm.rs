@@ -4,18 +4,16 @@ mod call_frame;
 mod error;
 mod heap;
 mod operation;
-pub mod value;
 
-use crate::{
-    bytecode::Bytecode,
-    vm::{
-        call_frame::CallFrame,
-        error::VmError,
-        heap::{Allocator, Gc, RootTracer},
-        operation::OpCode,
-        utils::obj_to_ptr,
-        value::Value,
-    },
+use pillow_nan::Value;
+use pillow_pack::Bytecode;
+
+use crate::vm::{
+    call_frame::CallFrame,
+    error::VmError,
+    heap::{Allocator, Gc, RootTracer},
+    operation::OpCode,
+    utils::obj_to_ptr,
 };
 use core::mem::MaybeUninit;
 use std::ptr::NonNull;
@@ -570,9 +568,9 @@ where
 }
 
 mod utils {
+    use pillow_nan::{CANON_NAN_BITS, Value};
+
     use crate::vm::error::VmError;
-    use crate::vm::value::CANON_NAN_BITS;
-    use crate::vm::value::Value;
 
     /// Structural equality for Pillow values.
     ///
@@ -642,9 +640,10 @@ impl<'a> RootTracer for VmRootTracer<'a> {
 mod tests {
     use core::f64;
 
-    use crate::bytecode::Bytecode;
+    use pillow_nan::Value;
+    use pillow_pack::Bytecode;
+
     use crate::vm::heap::{Allocator, BumpAllocator, MarkSweep};
-    use crate::vm::value::Value;
     use crate::vm::{STACK_MAX, Vm, VmError};
 
     // Mirrors OpCode repr(u8) values. Defined here so tests are readable

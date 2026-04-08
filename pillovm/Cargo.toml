@@ -9,3 +9,5 @@ std = ["alloc"]
 alloc = []
 
 [dependencies]
+pillow-nan = { path = "../pillow-nan" }
+pillow-pack = { path = "../pillow-pack" }

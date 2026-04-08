@@ -1,5 +1,4 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-use crate::vm::value::Value;
+use pillow_nan::Value;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bytecode<'code> {
