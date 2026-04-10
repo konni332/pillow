@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod call_frame;
+pub mod config;
 mod error;
 mod heap;
 mod operation;

@@ -4,6 +4,12 @@ pub struct ReferenceCounting {
     nogc_depth: u32,
 }
 
+impl ReferenceCounting {
+    pub fn new() -> Self {
+        Self { nogc_depth: 0 }
+    }
+}
+
 impl<A: Allocator> Gc<A> for ReferenceCounting {
     fn in_nogc(&self) -> bool {
         self.nogc_depth > 0
@@ -27,4 +33,3 @@ impl<A: Allocator> Gc<A> for ReferenceCounting {
         unimplemented!()
     }
 }
-

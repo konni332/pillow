@@ -3,6 +3,14 @@ name = "pillovm"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "pillovm_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pillovm"
+path = "src/main.rs"
+
 [features]
 default = ["std"]
 std = ["alloc"]

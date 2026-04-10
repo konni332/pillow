@@ -4,3 +4,6 @@
 extern crate alloc;
 
 mod vm;
+
+pub use vm::Vm;
+pub use vm::config;
