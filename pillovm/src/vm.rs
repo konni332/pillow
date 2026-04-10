@@ -156,6 +156,18 @@ where
         Ok(Value::from_obj(allocation.ptr.as_ptr() as u64))
     }
 
+    #[inline(always)]
+    fn op_const(&mut self) -> Result<(), VmError> {
+        let idx = self.read_byte()? as usize;
+        let val = self
+            .bytecode
+            .constants
+            .get(idx)
+            .copied()
+            .ok_or(VmError::ConstPoolOutOfBounds)?;
+        self.push(val)
+    }
+
     // Arithmetic dispatch
     //
     // Pillow arithmetic rules:
@@ -512,16 +524,7 @@ where
 
             match op {
                 OpCode::Nop => { /* nothing */ }
-                OpCode::Const => {
-                    let idx = self.read_byte()? as usize;
-                    let val = self
-                        .bytecode
-                        .constants
-                        .get(idx)
-                        .copied()
-                        .ok_or(VmError::ConstPoolOutOfBounds)?;
-                    self.push(val)?;
-                }
+                OpCode::Const => self.op_const()?,
 
                 OpCode::Add => self.arith_add()?,
                 OpCode::Sub => self.arith_sub()?,

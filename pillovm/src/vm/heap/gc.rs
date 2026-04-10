@@ -2,7 +2,9 @@ use super::allocator::Allocator;
 use core::ptr::NonNull;
 
 mod mark_sweep;
+mod reference_counting;
 pub use mark_sweep::MarkSweep;
+pub use reference_counting::ReferenceCounting;
 
 /// Called by the GC during the mark phase to enumerate root Values.
 /// The VM implements this. It walks the value stack, call stack
