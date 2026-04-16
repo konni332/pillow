@@ -1,0 +1,124 @@
+grammar;
+
+extern {
+    type Error = String;
+}
+
+// =========================
+// Imports
+// =========================
+
+use crate::ast::{Stmt, Instr};
+
+// =========================
+// Entry point
+// =========================
+
+pub Program: Vec<Stmt> = {
+    <stmts:Stmt*> => stmts
+};
+
+// =========================
+// Statements
+// =========================
+
+Stmt: Stmt = {
+    Label => Stmt::Label(<>),
+    Instr => Stmt::Instr(<>),
+};
+
+// =========================
+// Labels
+// =========================
+
+Label: String = {
+    <id:Ident> ":" => id
+};
+
+// =========================
+// Instructions
+// =========================
+
+Instr: Instr = {
+
+    // --- No operand ---
+    "nop" => Instr::Nop,
+    "add" => Instr::Add,
+    "sub" => Instr::Sub,
+    "mul" => Instr::Mul,
+    "div" => Instr::Div,
+    "return" => Instr::Return,
+
+    "neg" => Instr::Neg,
+    "not" => Instr::Not,
+
+    "eq" => Instr::Eq,
+    "ne" => Instr::Ne,
+    "lt" => Instr::Lt,
+    "le" => Instr::Le,
+    "gt" => Instr::Gt,
+    "ge" => Instr::Ge,
+
+    "pop" => Instr::Pop,
+    "dup" => Instr::Dup,
+
+    "enter_nogc" => Instr::EnterNoGc,
+    "exit_nogc" => Instr::ExitNoGc,
+
+    "load" => Instr::Load,
+    "store" => Instr::Store,
+    "loadb" => Instr::LoadB,
+    "storeb" => Instr::StoreB,
+
+    // --- Single operand ---
+    "const" <n:U8> => Instr::Const(n),
+
+    "make_frame" <n:U8> => Instr::MakeFrame(n),
+    "get_local" <n:U8> => Instr::GetLocal(n),
+    "set_local" <n:U8> => Instr::SetLocal(n),
+
+    // --- Control flow ---
+    "jmp" <label:Ident> => Instr::Jmp(label),
+    "jmp_if_false" <label:Ident> => Instr::JmpIfFalse(label),
+    "jmp_if_true" <label:Ident> => Instr::JmpIfTrue(label),
+
+    // --- Multi operand ---
+    "call" <addr:U32> "," <argc:U8> => Instr::Call(addr, argc),
+
+    "alloc" <size:U16> "," <flag:U8> => Instr::Alloc(size, flag),
+};
+
+// =========================
+// Identifiers
+// =========================
+
+Ident: String = {
+    <r"[a-zA-Z_][a-zA-Z0-9_]*"> => <>.to_string()
+};
+
+// =========================
+// Numbers
+// =========================
+
+use lalrpop_util::ParseError;
+
+U8: u8 = {
+    <s:r"[0-9]+"> =>? {
+        s.parse::<u8>()
+            .map_err(|_| ParseError::User { error: format!("invalid u8: {}", s) })
+    }
+};
+
+U16: u16 = {
+    <s:r"[0-9]+"> =>? {
+        s.parse::<u16>()
+            .map_err(|_| ParseError::User { error: format!("invalid u16: {}", s) })
+    }
+};
+
+U32: u32 = {
+    <s:r"[0-9]+"> =>? {
+        s.parse::<u32>()
+            .map_err(|_| ParseError::User { error: format!("invalid u32: {}", s) })
+    }
+};

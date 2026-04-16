@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 pillow-nan = { path = "../pillow-nan" }
+logos = "0.16"

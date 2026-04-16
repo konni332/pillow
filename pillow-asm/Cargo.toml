@@ -1,0 +1,16 @@
+[package]
+name = "pillow-asm"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[lib]
+name = "pillow_asm"
+path = "src/lib.rs"
+
+[dependencies]
+lalrpop-util = "0.23"
+regex = "1"
+
+[build-dependencies]
+lalrpop = "0.23"
